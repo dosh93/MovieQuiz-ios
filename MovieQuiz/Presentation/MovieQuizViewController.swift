@@ -83,11 +83,15 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
         
         let bestGame = statisticService.bestGame
         let totalText = "Количество сыгранных квизов: \(statisticService.gamesCount)"
-        let totalAccuracyText = "Средняя точность: \(String(format: "%.2f", statisticService.totalAccuracy))"
-        let bestGameText = "Рекорд: \(bestGame.correct)/\(bestGame.total) ( \(bestGame.date.dateTimeString))"
+        let totalAccuracyText = "Средняя точность: \(String(format: "%.2f%", statisticService.totalAccuracy))"
+        let bestGameText = "Рекорд: \(bestGame.correct)/\(bestGame.total) (\(bestGame.date.dateTimeString))"
         
-        let alertModel = AlertModel(title: result.title, message: "\(result.text)\n\(totalText)\n\(bestGameText)\n\(totalAccuracyText)", buttonText: result.buttonText) { [weak self] in
-            guard let self = self else { return }
+        let alertModel = AlertModel(
+            title: result.title,
+            message: "\(result.text)\n\(totalText)\n\(bestGameText)\n\(totalAccuracyText)",
+            buttonText: result.buttonText
+        ) { 
+            [weak self] in guard let self = self else { return }
             self.currentQuestionIndex = 0
             self.correctAnswers = 0
             self.imageView.layer.borderWidth = 0
