@@ -1,6 +1,9 @@
 import UIKit
 
 final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
+    @IBOutlet weak var noButton: UIButton!
+    @IBOutlet weak var yesButton: UIButton!
+    @IBOutlet private weak var activityIndicator: UIActivityIndicatorView!
     @IBOutlet private weak var counterLabel: UILabel!
     @IBOutlet private weak var textLabel: UILabel!
     @IBOutlet private weak var imageView: UIImageView!
@@ -10,22 +13,23 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
     // переменная со счётчиком правильных ответов, начальное значение закономерно 0
     private var correctAnswers = 0
     private let questionsAmount: Int = 10
-    private var questionFactory: QuestionFactoryProtocol? = QuestionFactory()
+    private var questionFactory: QuestionFactoryProtocol?
     private var currentQuestion: QuizQuestion?
     private lazy var alertPresenter = AlertPresenter(viewController: self)
-    private var statisticService: StatisticService = StatisticServiceImplementation()
+    private var statisticService: StatisticService?
     
     
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
-        if let concreteQuestionFactory = questionFactory as? QuestionFactory {
-            concreteQuestionFactory.delegate = self
-        }
-        // берём текущий вопрос из массива вопросов по индексу текущего вопроса
-        questionFactory?.requestNextQuestion()
-        
         super.viewDidLoad()
+        
+        imageView.layer.cornerRadius = 20
+        questionFactory = QuestionFactory(moviesLoader: MoviesLoader(), delegate: self)
+        statisticService = StatisticServiceImplementation()
+
+        showLoadingIndicator()
+        questionFactory?.loadData()
     }
     
     // MARK: - QuestionFactoryDelegate
@@ -44,28 +48,34 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
     
     // метод вызывается, когда пользователь нажимает на кнопку "Да"
     @IBAction private func yesButtonClicked(_ sender: UIButton) {
+        disabledButtons()
         guard let currentQuestion = currentQuestion else {
             return
         }
         let givenAnswer = true
         
-        showAnswerResult(isCorrect: givenAnswer == currentQuestion.correctAnswer)
+        showAnswerResult(isCorrect: givenAnswer == currentQuestion.correctAnswer) {
+            self.enabledButtons()
+        }
     }
     
     // метод вызывается, когда пользователь нажимает на кнопку "Нет"
     @IBAction private func noButtonClicked(_ sender: UIButton) {
+        disabledButtons()
         guard let currentQuestion = currentQuestion else {
             return
         }
         let givenAnswer = false
         
-        showAnswerResult(isCorrect: givenAnswer == currentQuestion.correctAnswer)
+        showAnswerResult(isCorrect: givenAnswer == currentQuestion.correctAnswer) {
+            self.enabledButtons()
+        }
     }
     
     // метод конвертации, который принимает моковый вопрос и возвращает вью модель для экрана вопроса
     private func convert(model: QuizQuestion) -> QuizStepViewModel {
         return QuizStepViewModel(
-            image: UIImage(named: model.image) ?? UIImage(),
+            image: UIImage(data: model.image) ?? UIImage(),
             question: model.text,
             questionNumber: "\(currentQuestionIndex + 1)/\(questionsAmount)"
         )
@@ -79,12 +89,17 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
     }
     
     private func show(quiz result: QuizResultsViewModel) {
-        statisticService.store(correct: self.correctAnswers, total: self.questionsAmount)
+        statisticService?.store(correct: self.correctAnswers, total: self.questionsAmount)
         
-        let bestGame = statisticService.bestGame
-        let totalText = "Количество сыгранных квизов: \(statisticService.gamesCount)"
-        let totalAccuracyText = "Средняя точность: \(String(format: "%.2f", statisticService.totalAccuracy))%"
-        let bestGameText = "Рекорд: \(bestGame.correct)/\(bestGame.total) (\(bestGame.date.dateTimeString))"
+        let bestGame = statisticService?.bestGame
+        let gamesCount = statisticService?.gamesCount ?? 0
+        let totalText = "Количество сыгранных квизов: \(String(describing: gamesCount))"
+        let totalAccuracy = statisticService?.totalAccuracy ?? 0
+        let totalAccuracyText = "Средняя точность: \(String(format: "%.2f", totalAccuracy))%"
+        let correct = bestGame?.correct ?? 0
+        let total = bestGame?.total ?? 0
+        let date = bestGame?.date.dateTimeString ?? "н/д"
+        let bestGameText = "Рекорд: \(correct)/\(total) (\(date))"
         
         let alertModel = AlertModel(
             title: result.title,
@@ -95,7 +110,6 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
             self.currentQuestionIndex = 0
             self.correctAnswers = 0
             self.imageView.layer.borderWidth = 0
-            
             self.questionFactory?.requestNextQuestion()
         }
         
@@ -104,7 +118,7 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
     
     // приватный метод, который меняет цвет рамки
     // принимает на вход булевое значение и ничего не возвращает
-    private func showAnswerResult(isCorrect: Bool) {
+    private func showAnswerResult(isCorrect: Bool, completion: @escaping () -> Void) {
         if isCorrect {
             correctAnswers += 1
         }
@@ -117,6 +131,7 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
             self.showNextQuestionOrResults()
+            completion()
         }
     }
     
@@ -132,10 +147,56 @@ final class MovieQuizViewController: UIViewController, QuestionFactoryDelegate {
             show(quiz: viewModel)
         } else { // 2
             currentQuestionIndex += 1
-            imageView.layer.borderWidth = 0
             
             questionFactory?.requestNextQuestion()
+            imageView.layer.borderWidth = 0
         }
+    }
+    
+    private func showLoadingIndicator() {
+        activityIndicator.isHidden = false
+        activityIndicator.startAnimating()
+    }
+    
+    private func hideLoadingIndicator() {
+        activityIndicator.isHidden = true
+        activityIndicator.stopAnimating()
+    }
+    
+    private func showNetworkError(message: String) {
+        hideLoadingIndicator()
+        
+        let model = AlertModel(
+            title: "Ошибка",
+            message: message,
+            buttonText: "Попробовать еще раз"
+        ) { [weak self] in
+            guard let self = self else { return }
+            self.currentQuestionIndex = 0
+            self.correctAnswers = 0
+            self.showLoadingIndicator()
+            self.questionFactory?.loadData()
+        }
+        alertPresenter.present(alertModel: model)
+    }
+    
+    func didLoadDataFromServer() {
+        hideLoadingIndicator()
+        questionFactory?.requestNextQuestion()
+    }
+
+    func didFailToLoadData(with error: Error) {
+        showNetworkError(message: error.localizedDescription)
+    }
+    
+    private func disabledButtons() {
+        noButton.isEnabled = false
+        yesButton.isEnabled = false
+    }
+    
+    private func enabledButtons() {
+        noButton.isEnabled = true
+        yesButton.isEnabled = true
     }
 }
 
